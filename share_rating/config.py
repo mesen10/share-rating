@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-REQUIRED_KEYS = ("TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "IMDB_USER_ID")
+REQUIRED_KEYS = ("TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET")
 
 
 class ConfigError(Exception):
@@ -17,7 +17,6 @@ class ConfigError(Exception):
 class Config:
     trakt_client_id: str
     trakt_client_secret: str
-    imdb_user_id: str
     tmdb_api_key: str | None = None
     db_path: Path = Path("share_rating.db")
     port: int = 8765
@@ -41,7 +40,6 @@ def load_config(env_path: Path = Path(".env")) -> Config:
     return Config(
         trakt_client_id=values["TRAKT_CLIENT_ID"],
         trakt_client_secret=values["TRAKT_CLIENT_SECRET"],
-        imdb_user_id=values["IMDB_USER_ID"],
         tmdb_api_key=values.get("TMDB_API_KEY"),
         db_path=Path(values.get("DB_PATH", "share_rating.db")),
         port=port,

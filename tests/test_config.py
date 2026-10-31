@@ -22,7 +22,6 @@ def write_env(tmp_path, **values):
 REQUIRED = {
     "TRAKT_CLIENT_ID": "fake-id",
     "TRAKT_CLIENT_SECRET": "fake-secret",
-    "IMDB_USER_ID": "ur00000000",
 }
 
 
@@ -31,7 +30,7 @@ def test_load_config_reads_all_keys(tmp_path):
     config = load_config(path)
     assert config.trakt_client_id == "fake-id"
     assert config.trakt_client_secret == "fake-secret"
-    assert config.imdb_user_id == "ur00000000"
+    assert not hasattr(config, "imdb_user_id")
     assert config.tmdb_api_key == "fake-tmdb"
     assert config.db_path == Path("data/x.db")
     assert config.port == 9100
@@ -45,8 +44,8 @@ def test_load_config_defaults(tmp_path):
 
 
 def test_load_config_missing_key_raises(tmp_path):
-    values = {k: v for k, v in REQUIRED.items() if k != "IMDB_USER_ID"}
-    with pytest.raises(ConfigError, match="IMDB_USER_ID"):
+    values = {k: v for k, v in REQUIRED.items() if k != "TRAKT_CLIENT_SECRET"}
+    with pytest.raises(ConfigError, match="TRAKT_CLIENT_SECRET"):
         load_config(write_env(tmp_path, **values))
 
 

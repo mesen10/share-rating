@@ -1,0 +1,5 @@
+Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
+tt0111161,9,2020-01-05,The Shawshank Redemption,The Shawshank Redemption,https://www.imdb.com/title/tt0111161/,Movie,9.3,142,1994,Drama,3000000,1994-09-23,Frank Darabont
+tt0068646,8,2021-03-14,The Godfather,The Godfather,https://www.imdb.com/title/tt0068646/,Movie,9.2,175,1972,"Crime, Drama",2000000,1972-03-24,Francis Ford Coppola
+tt0903747,10,2022-07-30,Breaking Bad,Breaking Bad,https://www.imdb.com/title/tt0903747/,TV Series,9.5,45,2008,"Crime, Drama, Thriller",2200000,2008-01-20,
+tt0133093,,2023-01-01,The Matrix,The Matrix,https://www.imdb.com/title/tt0133093/,Movie,8.7,136,1999,"Action, Sci-Fi",2100000,1999-03-31,"Lana Wachowski, Lilly Wachowski"

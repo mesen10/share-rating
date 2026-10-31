@@ -73,3 +73,11 @@ def test_kv_roundtrip(conn):
     db.kv_set(conn, "k", "v1")
     db.kv_set(conn, "k", "v2")
     assert db.kv_get(conn, "k") == "v2"
+
+
+def test_mark_rated_excludes_and_survives_csv_import(conn):
+    db.replace_watched(conn, [item(1), item(2)])
+    db.mark_rated(conn, "tt0000001")
+    db.mark_rated(conn, "tt0000001")
+    db.replace_imdb_ratings(conn, {})
+    assert candidate_ids(conn) == ["tt0000002"]

@@ -13,7 +13,7 @@ from share_rating.trakt import TraktAuthError, TraktClient
 
 API = "https://api.trakt.tv"
 FIXTURES = Path(__file__).parent / "fixtures"
-CONFIG = Config(trakt_client_id="fake-id", trakt_client_secret="fake-secret", imdb_user_id="ur00000000")
+CONFIG = Config(trakt_client_id="fake-id", trakt_client_secret="fake-secret")
 
 
 def store_tokens(conn, created_at=None, expires_in=86400, access="old-access"):

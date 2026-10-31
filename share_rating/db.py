@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS watched (
 );
 CREATE TABLE IF NOT EXISTS imdb_ratings (imdb_id TEXT PRIMARY KEY, rating INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS hidden (imdb_id TEXT PRIMARY KEY, hidden_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS self_rated (imdb_id TEXT PRIMARY KEY, rated_at TEXT NOT NULL);  -- user's "Rated" confirmations
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -76,12 +77,18 @@ def hide(conn: sqlite3.Connection, imdb_id: str) -> None:
         conn.execute("INSERT OR IGNORE INTO hidden VALUES (?, ?)", (imdb_id, _now()))
 
 
+def mark_rated(conn: sqlite3.Connection, imdb_id: str) -> None:
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO self_rated VALUES (?, ?)", (imdb_id, _now()))
+
+
 def unrated_candidates(conn: sqlite3.Connection) -> list[Card]:
     rows = conn.execute(
         """
         SELECT * FROM watched
         WHERE imdb_id IS NOT NULL
           AND imdb_id NOT IN (SELECT imdb_id FROM imdb_ratings)
+          AND imdb_id NOT IN (SELECT imdb_id FROM self_rated)
           AND imdb_id NOT IN (SELECT imdb_id FROM hidden)
         """
     ).fetchall()
