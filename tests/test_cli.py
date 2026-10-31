@@ -30,5 +30,5 @@ def test_serve_binds_localhost(monkeypatch):
 
     assert main(["serve", "--no-browser"]) == 0
     assert calls["host"] == "127.0.0.1"
-    assert calls["port"] == 8765
+    assert calls["port"] == 8510
     assert opened == []

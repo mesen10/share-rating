@@ -83,7 +83,7 @@ def test_expired_token_refreshes_then_retries(conn):
     refresh_body = json.loads(responses.calls[0].request.body)
     assert refresh_body["grant_type"] == "refresh_token"
     assert refresh_body["refresh_token"] == "fake-refresh"
-    assert refresh_body["redirect_uri"] == "urn:ietf:wg:oauth:2.0:oob"
+    assert refresh_body["redirect_uri"] == "http://localhost:8510/callback"
     assert json.loads(db.kv_get(conn, "trakt_tokens"))["access_token"] == "new-access"
     assert responses.calls[1].request.headers["Authorization"] == "Bearer new-access"
 
@@ -149,3 +149,26 @@ def test_device_auth_denied_raises(conn):
     responses.post(f"{API}/oauth/device/token", status=418)
     with pytest.raises(TraktAuthError):
         TraktClient(CONFIG, conn).device_auth(print_fn=lambda _: None)
+
+
+PUBLIC_CONFIG = Config(trakt_client_id="fake-id")
+
+
+@responses.activate
+def test_refresh_without_secret_omits_it(conn):
+    store_tokens(conn, created_at=1_000_000)
+    responses.post(f"{API}/oauth/token", json=token_response())
+    mock_watched(responses)
+    TraktClient(PUBLIC_CONFIG, conn).fetch_watched()
+    assert "client_secret" not in json.loads(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_device_auth_without_secret_omits_it(conn):
+    responses.post(f"{API}/oauth/device/code", json={
+        "device_code": "dev-code", "user_code": "ABCD1234",
+        "verification_url": "https://trakt.tv/activate", "expires_in": 600, "interval": 0,
+    })
+    responses.post(f"{API}/oauth/device/token", json=token_response("device-access"))
+    TraktClient(PUBLIC_CONFIG, conn).device_auth(print_fn=lambda _: None)
+    assert json.loads(responses.calls[1].request.body) == {"code": "dev-code", "client_id": "fake-id"}

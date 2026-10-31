@@ -40,13 +40,19 @@ def test_load_config_defaults(tmp_path):
     config = load_config(write_env(tmp_path, **REQUIRED))
     assert config.tmdb_api_key is None
     assert config.db_path == Path("share_rating.db")
-    assert config.port == 8765
+    assert config.port == 8510
 
 
 def test_load_config_missing_key_raises(tmp_path):
-    values = {k: v for k, v in REQUIRED.items() if k != "TRAKT_CLIENT_SECRET"}
-    with pytest.raises(ConfigError, match="TRAKT_CLIENT_SECRET"):
+    values = {k: v for k, v in REQUIRED.items() if k != "TRAKT_CLIENT_ID"}
+    with pytest.raises(ConfigError, match="TRAKT_CLIENT_ID"):
         load_config(write_env(tmp_path, **values))
+
+
+def test_client_secret_is_optional(tmp_path):
+    # Trakt apps created since 2026-10 use PKCE and get no client secret.
+    config = load_config(write_env(tmp_path, TRAKT_CLIENT_ID="fake-id"))
+    assert config.trakt_client_secret is None
 
 
 def test_load_config_empty_value_counts_as_missing(tmp_path):

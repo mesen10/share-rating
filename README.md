@@ -24,8 +24,9 @@ from IMDb's own CSV export, which you upload yourself.
    ```
 
 3. Create a Trakt API app at <https://trakt.tv/oauth/applications> with redirect URI
-   `urn:ietf:wg:oauth:2.0:oob`. Put its client id and secret in `.env`
-   (`TRAKT_CLIENT_ID=your-client-id`, `TRAKT_CLIENT_SECRET=your-client-secret`).
+   `http://localhost:8510/callback` (login uses a device code, so this page is never opened). Put its client id in `.env`
+   (`TRAKT_CLIENT_ID=your-client-id`). New Trakt apps show the client secret as "Not issued";
+   leave `TRAKT_CLIENT_SECRET` empty then. Older apps that have one can set it.
 
 4. Optional, for posters: get a TMDB API key at <https://www.themoviedb.org/settings/api>
    and set `TMDB_API_KEY` in `.env`. Without it, cards show a plain placeholder.
@@ -42,7 +43,7 @@ from IMDb's own CSV export, which you upload yourself.
 .venv/bin/python -m share_rating serve
 ```
 
-The page opens at <http://127.0.0.1:8765/>.
+The page opens at <http://127.0.0.1:8510/>.
 
 1. **First time:** on IMDb go to *Your Ratings → Export*, download the CSV, and upload it with
    **Import IMDb CSV**. Titles you already rated are skipped from then on. Re-importing later is

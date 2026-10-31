@@ -13,7 +13,7 @@ from share_rating.config import Config
 from share_rating.models import WatchedItem
 
 API = "https://api.trakt.tv"
-REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
+REDIRECT_URI = "http://localhost:8510/callback"  # must match the Trakt app; device flow never visits it
 TOKENS_KEY = "trakt_tokens"
 REFRESH_MARGIN_SECONDS = 60
 TIMEOUT = 30
@@ -48,14 +48,19 @@ class TraktClient:
         tokens.setdefault("created_at", int(time.time()))
         db.kv_set(self.conn, TOKENS_KEY, json.dumps(tokens))
 
+    def _with_secret(self, body: dict) -> dict:
+        """Older Trakt apps have a client secret; PKCE apps (created since 2026-10) do not."""
+        if self.config.trakt_client_secret:
+            body["client_secret"] = self.config.trakt_client_secret
+        return body
+
     def _refresh(self, tokens: dict) -> dict:
-        resp = self.session.post(f"{API}/oauth/token", json={
+        resp = self.session.post(f"{API}/oauth/token", json=self._with_secret({
             "refresh_token": tokens["refresh_token"],
             "client_id": self.config.trakt_client_id,
-            "client_secret": self.config.trakt_client_secret,
             "redirect_uri": REDIRECT_URI,
             "grant_type": "refresh_token",
-        }, timeout=TIMEOUT)
+        }), timeout=TIMEOUT)
         if resp.status_code != 200:
             raise TraktAuthError("Trakt login expired")
         new_tokens = resp.json()
@@ -105,11 +110,10 @@ class TraktClient:
         deadline = time.time() + code["expires_in"]
         while time.time() < deadline:
             time.sleep(interval)
-            resp = self.session.post(f"{API}/oauth/device/token", json={
+            resp = self.session.post(f"{API}/oauth/device/token", json=self._with_secret({
                 "code": code["device_code"],
                 "client_id": self.config.trakt_client_id,
-                "client_secret": self.config.trakt_client_secret,
-            }, timeout=TIMEOUT)
+            }), timeout=TIMEOUT)
             if resp.status_code == 200:
                 self._save_tokens(resp.json())
                 print_fn("Logged in to Trakt.")
