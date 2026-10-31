@@ -4,7 +4,7 @@
 
 **Goal:** A local Flask page that shows 10 Trakt-watched titles not yet rated on IMDb, opens IMDb on click, and hides titles permanently on ✕.
 
-**Architecture:** One Python package `share_rating`. Thin HTTP clients (Trakt, IMDb scraper, TMDB) return plain dataclasses; `db.py` owns all SQLite access; `sync.py` orchestrates clients into the DB; `selection.py` is a pure function that picks cards; `web.py` is a server-rendered Flask app with a little JS for ✕. A CLI exposes `auth` (Trakt device flow) and `serve`.
+**Architecture:** One Python package `share_rating`. Thin HTTP clients (Trakt, TMDB) and an IMDb CSV parser return plain dataclasses; `db.py` owns all SQLite access; `sync.py` orchestrates clients into the DB; `selection.py` is a pure function that picks cards; `web.py` is a server-rendered Flask app with a little JS for ✕. A CLI exposes `auth` (Trakt device flow) and `serve`.
 
 **Tech Stack:** Python 3.15 (existing `.venv`), Flask, requests, SQLite (`sqlite3` stdlib), python-dotenv for `.env`, pytest, responses (HTTP mocking).
 
@@ -16,10 +16,11 @@
 - Python + SQLite, runs locally; server binds `127.0.0.1` only, default port `8765`.
 - The repo is **public** (`origin` = GitHub). Nothing personal is ever committed: no secrets, no Trakt/IMDb/TMDB ids or tokens, no real watch history or ratings, no usernames.
 - Secrets and personal settings live in `.env` (git-ignored); only `.env.example` with empty values is committed. Trakt tokens live in the DB `kv` table, never in code or `.env`.
-- Real captured data (IMDb pages, Trakt responses) goes only to `tests/fixtures/private/` (git-ignored). Committed fixtures are synthetic or anonymized.
+- Committed fixtures are synthetic; never commit the user's real CSV export or Trakt data.
 - Before every commit, run `git status` and `git diff --cached` and confirm no personal data is staged. Never run `git push`; the user pushes.
 - Trakt sync uses `/sync/watched/movies` and `/sync/watched/shows` only — never `/sync/history`.
-- A failed or partial IMDb scrape must never overwrite the stored ratings.
+- No automated requests to IMDb of any kind. IMDb input = uploaded CSV, parsed in memory, never written to disk. A bad CSV must never overwrite the stored ratings.
+- "Rated" confirmations (`self_rated`) are permanent; CSV import never touches them.
 - The `hidden` table is never modified by sync.
 - Titles without an IMDb ID are never shown.
 - Page copy: buttons `Sync` and `New 10`; IMDb link `https://www.imdb.com/title/<tt>/`, `target="_blank"`.
@@ -27,11 +28,11 @@
 
 ## Review Focus
 
-1. IMDb answers 403 / a bot-check page / a changed layout: the scrape raises `ImdbScrapeError`, stored ratings stay, the page shows a warning. Pinned in Task 4 and Task 6.
+1. Wrong file uploaded (Trakt export, an IMDb list export, PNG, BOM, odd header case): rejected with a message, stored ratings stay; a real export with a BOM still works. Pinned in Task 4 and Task 7.
 2. Trakt access token expired: the client refreshes once and retries; if refresh fails, the page says to run `python -m share_rating auth`. Pinned in Task 3.
 3. Trakt item with no IMDb ID or no TMDB ID, or TMDB down: no IMDb ID → never shown; no poster → placeholder, page still renders. Pinned in Task 2 and Task 5.
 4. Backlog nearly empty (fewer than 10 candidates, or zero): page shows what exists; zero shows "All caught up". Pinned in Task 5 and Task 7.
-5. A hidden title that disappears from Trakt and returns, or gets rated: stays hidden, never resurfaces. Pinned in Task 2.
+5. A hidden or "Rated"-confirmed title that disappears from Trakt and returns, or is missing from a later CSV: never resurfaces. Pinned in Task 2 and Task 4.
 
 ---
 
@@ -45,7 +46,7 @@ share_rating/
   models.py        WatchedItem, Card dataclasses
   db.py            schema + all queries
   trakt.py         Trakt client: device auth, refresh, fetch watched
-  imdb.py          public ratings scraper
+  imdb_csv.py      IMDb ratings CSV import
   tmdb.py          poster lookup
   selection.py     pick_cards (pure)
   sync.py          run_sync orchestration
@@ -55,8 +56,7 @@ share_rating/
   static/style.css
 tests/
   conftest.py      tmp DB fixture
-  fixtures/        synthetic/anonymized IMDb HTML, synthetic Trakt JSON
-  fixtures/private/  real captures (git-ignored)
+  fixtures/        synthetic IMDb CSV and Trakt JSON
   test_*.py        one per module
 .env.example
 pyproject.toml
@@ -180,44 +180,38 @@ Details the implementer needs:
 
 ---
 
-### Task 4: IMDb ratings scraper
+### Task 4: IMDb CSV import and "Rated" confirmations
+
+> Revised 2026-10-31: IMDb blocks automated requests (AWS WAF), so the scraper is replaced by CSV upload + in-app confirmations. See spec.
 
 **Files:**
-- Create: `share_rating/imdb.py`, `tests/fixtures/imdb_ratings_*.html`
-- Test: `tests/test_imdb.py`
+- Create: `share_rating/imdb_csv.py`, `tests/fixtures/imdb_ratings_sample.csv`
+- Modify: `share_rating/config.py`, `.env.example`, `tests/test_config.py` (drop `IMDB_USER_ID`); `share_rating/db.py`, `tests/test_db.py` (add `self_rated`)
+- Test: `tests/test_imdb_csv.py`
 
 **Interfaces:**
+- Consumes: `replace_imdb_ratings` (Task 2).
 - Produces:
-  - `class ImdbScrapeError(Exception)`.
-  - `RatingsPage` (dataclass): `ratings: dict[str, int]`, `total: int | None`, `next_url: str | None`.
-  - `parse_ratings_page(html: str, base_url: str) -> RatingsPage` — raises `ImdbScrapeError` if the page has no recognizable ratings data.
-  - `fetch_ratings(user_id: str, session: requests.Session | None = None) -> dict[str, int]` — start at `https://www.imdb.com/user/<user_id>/ratings`, follow `next_url` until `None`, return all ratings.
+  - `Config` without `imdb_user_id`; `REQUIRED_KEYS = ("TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET")`.
+  - `class CsvImportError(Exception)`.
+  - `parse_ratings_csv(data: bytes) -> dict[str, int]` — decode `utf-8-sig`; header match is case-insensitive and whitespace-trimmed; needs `Const` and `Your Rating` (else `CsvImportError` naming the missing column); keeps rows where `Const` matches `^tt\d+$` and rating is an int 1–10, skips others; zero kept rows → `CsvImportError`; undecodable / not CSV → `CsvImportError`.
+  - `import_ratings_csv(conn, data: bytes) -> int` — parse, then `replace_imdb_ratings`; returns the count. On error nothing is written.
+  - DB: table `self_rated (imdb_id TEXT PRIMARY KEY, rated_at TEXT NOT NULL)`; `mark_rated(conn, imdb_id: str) -> None` (idempotent); `unrated_candidates` also excludes `self_rated`.
 
-Rules:
-- Send a desktop-browser `User-Agent` and `Accept-Language: en-US`.
-- Any non-200, or a page that does not parse → `ImdbScrapeError`.
-- Partial scrape: if any page reports `total` and the final count differs from it → `ImdbScrapeError`. If no page reports a total, a final count of 0 → `ImdbScrapeError`.
-- Keys must match `^tt\d+$`; values int 1–10.
-- Pause ~1 s between pages.
-- Parsing technique (embedded `__NEXT_DATA__` JSON vs HTML) is the implementer's call, chosen from the real page.
-
-- [ ] **Step 1: Capture and anonymize fixtures.**
-  - Ask the user to put their IMDb `ur...` id in `.env` (`IMDB_USER_ID`) and confirm the list is public. Read it from `.env`; never write it into any committed file.
-  - Save the real page 1 (and page 2 if the list paginates) to `tests/fixtures/private/` (git-ignored). Use these only to learn the page structure.
-  - Build committed fixtures `tests/fixtures/imdb_ratings_page1.html` / `_page2.html` from that structure: keep the markup/JSON shape the parser reads, cut the list to ~5 items per page, replace the user id with `ur00000000`, the user name with `Test User`, and set the ratings to made-up values. Strip everything else personal (profile links, avatars, other lists, tracking ids).
-  - `grep` the committed fixtures for the real `ur...` id and the user's IMDb display name — expect no match.
-  - If IMDb returns 403 or a bot-check to `requests` with a browser User-Agent, stop and report to the user — do not add browser automation without their approval.
-- [ ] **Step 2: Write failing tests** (against the committed, anonymized fixtures):
-  - `test_parse_page_extracts_ratings` — from the page-1 fixture: count matches the fixture, all keys match `^tt\d+$`, all values in 1–10, and one specific `tt…` → rating pair from the fixture.
-  - `test_parse_page_reads_total_and_next` — `total` equals the page's displayed count; `next_url` set iff the list has more pages.
-  - `test_parse_garbage_raises` — `"<html><body>Captcha</body></html>"` → `ImdbScrapeError`.
-  - `test_fetch_follows_pagination` (responses) — two pages served, merged result.
-  - `test_fetch_403_raises`.
-  - `test_fetch_count_mismatch_raises` — page reports total 300, parsed 250, no next page → `ImdbScrapeError`.
-- [ ] **Step 3:** Run `.venv/bin/pytest tests/test_imdb.py -v` — expect FAIL.
-- [ ] **Step 4:** Implement `imdb.py`.
-- [ ] **Step 5:** Run tests — expect PASS.
-- [ ] **Step 6: Commit:** `git commit -m "feat: add IMDb public ratings scraper"`
+- [ ] **Step 1:** Synthetic fixture `tests/fixtures/imdb_ratings_sample.csv` with the real export header `Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors`, 3 well-known titles with made-up ratings, plus one row with an empty rating. Never use the user's real export.
+- [ ] **Step 2: Write failing tests:**
+  - `test_parse_sample_csv` — fixture → 3 entries, exact `{tt: rating}`; empty-rating row skipped.
+  - `test_parse_handles_bom_and_header_case` — `b"\xef\xbb\xbfconst , YOUR RATING\ntt0000001,7\n"` → `{"tt0000001": 7}`.
+  - `test_parse_missing_column_raises` — a Trakt-like CSV without `Your Rating` → `CsvImportError` matching `Your Rating`.
+  - `test_parse_no_valid_rows_raises` — header only → `CsvImportError`.
+  - `test_parse_binary_garbage_raises` — `b"\x89PNG\x00\xff"` → `CsvImportError`.
+  - `test_import_replaces_ratings` and `test_failed_import_keeps_previous` (seed `{"tt1": 8}`, bad bytes → still a non-candidate).
+  - In `tests/test_db.py`: `test_mark_rated_excludes_and_survives_csv_import` — `mark_rated`, then `replace_imdb_ratings({})` → still excluded; `mark_rated` twice is fine.
+  - In `tests/test_config.py`: remove `IMDB_USER_ID` from fixtures; missing-key test uses `TRAKT_CLIENT_SECRET`.
+- [ ] **Step 3:** Run `.venv/bin/pytest tests/test_imdb_csv.py tests/test_db.py tests/test_config.py -q` — expect FAIL.
+- [ ] **Step 4:** Implement; remove `IMDB_USER_ID` from `.env.example` and add a comment on where to export ratings (IMDb → Your Ratings → Export).
+- [ ] **Step 5:** Run the full suite — expect PASS.
+- [ ] **Step 6: Commit:** `git commit -m "feat: import IMDb ratings from CSV and record in-app confirmations"`
 
 ---
 
@@ -255,56 +249,69 @@ Rules:
 
 ### Task 6: Sync orchestration
 
+> Revised 2026-10-31: Trakt only; IMDb input is the CSV import (Task 4).
+
 **Files:**
 - Create: `share_rating/sync.py`
 - Test: `tests/test_sync.py`
 
 **Interfaces:**
-- Consumes: `TraktClient.fetch_watched`, `fetch_ratings`, `replace_watched`, `replace_imdb_ratings`, `kv_set`.
+- Consumes: `TraktClient.fetch_watched`, `TraktAuthError`, `replace_watched`, `kv_set`.
 - Produces:
-  - `SyncResult` (dataclass): `trakt_ok: bool`, `imdb_ok: bool`, `messages: list[str]`.
-  - `run_sync(conn, config, trakt: TraktClient, fetch_ratings_fn=fetch_ratings) -> SyncResult` — Trakt and IMDb run independently: a failure in one does not skip the other. On success store `kv` `last_trakt_sync` / `last_imdb_sync` (ISO UTC). Messages, exact copy:
+  - `SyncResult` (dataclass): `ok: bool`, `message: str`.
+  - `run_sync(conn, trakt: TraktClient) -> SyncResult` — on success store `kv` `last_trakt_sync` (ISO UTC); message `"Synced <N> watched titles from Trakt"`. Errors never reconcile. Exact copy:
     - `TraktAuthError` → `"Trakt login expired. Run: python -m share_rating auth"`
-    - other Trakt error → `"Trakt sync failed: <error>"`
-    - `ImdbScrapeError` / request error → `"IMDb sync failed, kept previous ratings: <error>"`
+    - `requests.RequestException` → `"Trakt sync failed: <error>"`
 
-- [ ] **Step 1: Write failing tests** (fake Trakt client and fake `fetch_ratings_fn`):
-  - `test_sync_success_updates_both` — watched and ratings stored, both ok, `kv` timestamps set.
-  - `test_imdb_failure_keeps_previous_ratings` — seed ratings `{"tt1": 8}`; fetch raises `ImdbScrapeError` → `tt1` still stored, `imdb_ok=False`, message starts with `"IMDb sync failed, kept previous ratings"`, Trakt still applied.
-  - `test_trakt_auth_error_message` — exact copy above; IMDb still applied.
-  - `test_trakt_failure_does_not_wipe_watched` — fetch raises `HTTPError` → watched table unchanged.
-- [ ] **Step 2:** Run `.venv/bin/pytest tests/test_sync.py -v` — expect FAIL.
+- [ ] **Step 1: Write failing tests** (fake Trakt client):
+  - `test_sync_success_updates_watched` — rows stored, `ok`, message has the count, `kv` timestamp set.
+  - `test_trakt_auth_error_message` — exact copy above.
+  - `test_trakt_failure_does_not_wipe_watched` — fetch raises `HTTPError` → watched table unchanged, message starts `"Trakt sync failed"`.
+- [ ] **Step 2:** Run `.venv/bin/pytest tests/test_sync.py -q` — expect FAIL.
 - [ ] **Step 3:** Implement `sync.py`.
 - [ ] **Step 4:** Run tests — expect PASS.
-- [ ] **Step 5: Commit:** `git commit -m "feat: add sync orchestration"`
+- [ ] **Step 5: Commit:** `git commit -m "feat: add Trakt sync orchestration"`
 
 ---
 
 ### Task 7: Web page
+
+> Revised 2026-10-31: adds CSV upload and the "Rated ✓ / Not yet" confirmation.
 
 **Files:**
 - Create: `share_rating/web.py`, `share_rating/templates/index.html`, `share_rating/static/app.js`, `share_rating/static/style.css`
 - Test: `tests/test_web.py`
 
 **Interfaces:**
-- Consumes: `unrated_candidates`, `pick_cards`, `ensure_posters`, `poster_url`, `hide`, `run_sync`, `TraktClient`.
-- Produces: `create_app(config: Config, *, trakt_factory=TraktClient, fetch_ratings_fn=fetch_ratings, rng: random.Random | None = None, now_fn=lambda: datetime.now(UTC)) -> Flask`. One DB connection per request (`flask.g`).
+- Consumes: `unrated_candidates`, `pick_cards`, `ensure_posters`, `poster_url`, `hide`, `mark_rated`, `import_ratings_csv`, `CsvImportError`, `run_sync`, `TraktClient`.
+- Produces: `create_app(config: Config, *, trakt_factory=TraktClient, rng: random.Random | None = None, now_fn=lambda: datetime.now(UTC)) -> Flask`. One DB connection per request (`flask.g`). `MAX_CONTENT_LENGTH = 20 MB`. `SECRET_KEY` random per process (flash only).
 
 Routes:
-- `GET /` — candidates → `pick_cards` → `ensure_posters` → render. Header: `"<N> unrated"`, `Sync` (form `POST /sync`), `New 10` (link to `/`). Grid of 2 rows × 5 cards (CSS grid, 5 columns). Card: poster (`poster_url` or a grey placeholder with the title), title, year, `Movie`/`Show`, `Watched <Mon YYYY>`, ✕ button. The poster/title is an `<a href="https://www.imdb.com/title/<tt>/" target="_blank" rel="noopener">`. Zero candidates → `"All caught up — nothing left to rate."`. Flash messages from sync shown above the grid.
-- `POST /hide/<imdb_id>` — validate `^tt\d+$` (else 400), `hide`, return 204. `app.js`: ✕ click → `fetch` POST → remove the card element; on failure keep the card and show an inline error. ✕ must not trigger the IMDb link.
-- `POST /sync` — `run_sync`, flash each message (or `"Sync complete"` if none), redirect to `/`.
+- `GET /` — candidates → `pick_cards` → `ensure_posters` → render. Top bar: `"<N> unrated"`, `Sync` (form `POST /sync`), `New 10` (link to `/`), `Import IMDb CSV` (form `POST /import`, `multipart/form-data`, file field `csv`, `accept=".csv"`, submits on file choose). Grid 2 rows × 5 cards (CSS grid, 5 columns). Card: poster (`poster_url` or a grey placeholder with the title), title, year, `Movie`/`Show`, `Watched <Mon YYYY>`, ✕ button. Poster/title is `<a href="https://www.imdb.com/title/<tt>/" target="_blank" rel="noopener">`. Zero candidates → `"All caught up — nothing left to rate."`. When no IMDb ratings were ever imported (`imdb_ratings` empty and `kv` `last_csv_import` unset) show a hint: `"Import your IMDb ratings CSV once so already-rated titles are skipped."`. Flash messages above the grid.
+- `POST /hide/<imdb_id>` and `POST /rated/<imdb_id>` — validate `^tt\d+$` (else 400), call `hide` / `mark_rated`, return 204.
+- `POST /sync` — `run_sync(conn, trakt_factory(config, conn))`, flash its message, redirect `/`.
+- `POST /import` — no file → flash `"Choose a CSV file first"`; `import_ratings_csv` → flash `"Imported <N> IMDb ratings"` and set `kv` `last_csv_import`; `CsvImportError` → flash `"CSV import failed, kept previous ratings: <error>"`. Redirect `/`. The upload is never written to disk.
+
+`app.js`:
+- Link click: let the browser open the tab (no `preventDefault`), then add class `asking` to the card, which shows an overlay with `Rated ✓` and `Not yet`.
+- `Rated ✓` → `fetch` POST `/rated/<tt>` → remove card. `Not yet` → remove `asking`.
+- ✕ → `fetch` POST `/hide/<tt>` → remove card; ✕ never triggers the link.
+- On fetch failure keep the card and show an inline error.
 
 - [ ] **Step 1: Write failing tests** (Flask test client, temp DB, seeded rows, `rng=Random(0)`):
-  - `test_index_shows_10_cards_with_imdb_links` — 30 candidates → exactly 10 `href="https://www.imdb.com/title/tt` with `target="_blank"`; unrated count shows `30 unrated`.
-  - `test_index_excludes_rated_and_hidden`.
+  - `test_index_shows_10_cards_with_imdb_links` — 30 candidates → exactly 10 `href="https://www.imdb.com/title/tt` with `target="_blank"`; shows `30 unrated`.
+  - `test_index_excludes_rated_confirmed_and_hidden`.
   - `test_index_empty_state` — `"All caught up"`.
-  - `test_index_renders_without_tmdb_key` — placeholder used, 200.
-  - `test_hide_endpoint` — 204, then title absent from `/`; `POST /hide/notanid` → 400.
-  - `test_sync_flashes_messages` — fake IMDb failure → redirect, then `/` contains `"IMDb sync failed, kept previous ratings"`.
-- [ ] **Step 2:** Run `.venv/bin/pytest tests/test_web.py -v` — expect FAIL.
+  - `test_index_shows_import_hint_until_first_import`.
+  - `test_index_renders_without_tmdb_key` — placeholder, 200.
+  - `test_hide_and_rated_endpoints` — 204 each, titles gone from `/`; `POST /rated/notanid` → 400.
+  - `test_import_csv_success` — upload the fixture → redirect; `/` shows `"Imported 3 IMDb ratings"`; those titles gone.
+  - `test_import_csv_bad_file_keeps_ratings` — upload garbage → `"CSV import failed, kept previous ratings"`; earlier ratings still applied.
+  - `test_import_without_file`.
+  - `test_sync_flashes_message` — fake Trakt raising `TraktAuthError` → `/` shows `"Trakt login expired"`.
+- [ ] **Step 2:** Run `.venv/bin/pytest tests/test_web.py -q` — expect FAIL.
 - [ ] **Step 3:** Implement routes, template, JS, CSS.
-- [ ] **Step 4:** Run tests — expect PASS.
+- [ ] **Step 4:** Run the full suite — expect PASS.
 - [ ] **Step 5: Commit:** `git commit -m "feat: add poster grid web page"`
 
 ---
