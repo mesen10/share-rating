@@ -8,6 +8,8 @@ Click ✕ to never see a title again.
 Everything runs locally. IMDb is never contacted automatically: your existing IMDb ratings come
 from IMDb's own CSV export, which you upload yourself.
 
+![The share-rating page: a grid of unrated titles with Sync, New 10 and Import IMDb CSV buttons](screenshot.png)
+
 ## Setup
 
 1. Create a virtualenv and install:
