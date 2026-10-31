@@ -72,3 +72,27 @@ def test_ensure_posters_without_key_or_tmdb_id_skips(conn):
     assert ensure_posters(conn, seed(conn), None)[0].poster_path is None
     assert ensure_posters(conn, seed(conn, tmdb_id=None), "fake-key")[0].poster_path is None
     assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_ensure_posters_non_json_200_leaves_null(conn):
+    responses.get(f"{TMDB}/movie/11", body="<html>captive portal</html>", status=200)
+    assert ensure_posters(conn, seed(conn), "fake-key")[0].poster_path is None
+
+
+@responses.activate
+def test_ensure_posters_stops_after_network_error(conn):
+    import requests
+    db.replace_watched(conn, [
+        WatchedItem("movie", 1, "tt0000001", 11, "A", 2000, datetime(2024, 1, 1, tzinfo=UTC)),
+        WatchedItem("movie", 2, "tt0000002", 22, "B", 2000, datetime(2024, 1, 1, tzinfo=UTC)),
+    ])
+    responses.get(f"{TMDB}/movie/11", body=requests.Timeout("slow"))
+    responses.get(f"{TMDB}/movie/22", body=requests.Timeout("slow"))
+    ensure_posters(conn, db.unrated_candidates(conn), "fake-key")
+    assert len(responses.calls) == 1
+
+
+def test_tmdb_timeout_is_short():
+    from share_rating import tmdb
+    assert tmdb.TIMEOUT <= 3

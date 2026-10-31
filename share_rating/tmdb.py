@@ -10,7 +10,7 @@ from share_rating.models import Card
 
 API = "https://api.themoviedb.org/3"
 IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
-TIMEOUT = 10
+TIMEOUT = 3
 
 
 def poster_url(poster_path: str | None) -> str | None:
@@ -26,10 +26,15 @@ def ensure_posters(
     if not api_key:
         return cards
     session = session or requests.Session()
+    reachable = True
     result = []
     for card in cards:
-        if card.poster_path is None and card.tmdb_id is not None:
-            path = _lookup(session, card, api_key)
+        if reachable and card.poster_path is None and card.tmdb_id is not None:
+            try:
+                path = _lookup(session, card, api_key)
+            except requests.RequestException:
+                reachable = False  # don't make the page wait on every remaining card
+                path = None
             if path is not None:
                 db.set_poster_path(conn, card.type, card.tmdb_id, path)
                 card = dataclasses.replace(card, poster_path=path)
@@ -38,14 +43,14 @@ def ensure_posters(
 
 
 def _lookup(session: requests.Session, card: Card, api_key: str) -> str | None:
-    """Return the poster path, "" if TMDB has none, or None if TMDB could not be reached."""
+    """Return the poster path, "" if TMDB has none, or None if the answer was unusable."""
     kind = "tv" if card.type == "show" else "movie"
-    try:
-        resp = session.get(f"{API}/{kind}/{card.tmdb_id}", params={"api_key": api_key}, timeout=TIMEOUT)
-    except requests.RequestException:
-        return None
+    resp = session.get(f"{API}/{kind}/{card.tmdb_id}", params={"api_key": api_key}, timeout=TIMEOUT)
     if resp.status_code == 404:
         return ""
     if resp.status_code != 200:
         return None
-    return resp.json().get("poster_path") or ""
+    try:
+        return resp.json().get("poster_path") or ""
+    except ValueError:
+        return None

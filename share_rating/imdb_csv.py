@@ -32,6 +32,8 @@ def parse_ratings_csv(data: bytes) -> dict[str, int]:
         raise CsvImportError(f"cannot read CSV: {e}") from None
 
     columns = {name.strip().lower(): i for i, name in enumerate(header)}
+    if "position" in columns:  # list and watchlist exports have it; the ratings export does not
+        raise CsvImportError("this is an IMDb list or watchlist export, not 'Your Ratings'")
     missing = [c for c in REQUIRED_COLUMNS if c.lower() not in columns]
     if missing:
         raise CsvImportError(

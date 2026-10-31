@@ -68,3 +68,14 @@ def test_failed_import_keeps_previous(conn):
     with pytest.raises(CsvImportError):
         import_ratings_csv(conn, b"not,a,ratings,file\n1,2,3,4\n")
     assert candidate_ids(conn) == ["tt9999999"]
+
+
+def test_parse_rejects_list_export():
+    list_export = (
+        b"Position,Const,Created,Modified,Description,Title,Original Title,URL,Title Type,"
+        b"IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors,Your Rating,Date Rated\n"
+        b"1,tt0000001,2024-01-01,2024-01-01,,X,X,https://www.imdb.com/title/tt0000001/,Movie,"
+        b"7.0,100,2000,Drama,10,2000-01-01,,8,2024-01-02\n"
+    )
+    with pytest.raises(CsvImportError, match="list"):
+        parse_ratings_csv(list_export)
