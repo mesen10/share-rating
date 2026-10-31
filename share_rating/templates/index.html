@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Share Rating</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="bar">
+    <strong>{{ unrated }} unrated</strong>
+    <form method="post" action="{{ url_for('sync') }}"><button type="submit">Sync</button></form>
+    <a class="button" href="{{ url_for('index') }}">New 10</a>
+    <form method="post" action="{{ url_for('import_csv') }}" enctype="multipart/form-data" class="import">
+      <label class="button">Import IMDb CSV
+        <input type="file" name="csv" accept=".csv" hidden onchange="this.form.submit()">
+      </label>
+    </form>
+  </header>
+
+  {% for message in get_flashed_messages() %}
+    <p class="flash">{{ message }}</p>
+  {% endfor %}
+
+  {% if never_imported %}
+    <p class="hint">Import your IMDb ratings CSV once so already-rated titles are skipped.
+      (IMDb &rarr; Your Ratings &rarr; Export)</p>
+  {% endif %}
+
+  {% if cards %}
+    <main class="grid">
+      {% for card in cards %}
+        {% set url = "https://www.imdb.com/title/" ~ card.imdb_id ~ "/" %}
+        <article class="card" data-imdb-id="{{ card.imdb_id }}">
+          <button class="hide" type="button" title="Never show this again" aria-label="Hide">&#x2715;</button>
+          <a class="poster-link" href="{{ url }}" target="_blank" rel="noopener">
+            {% set src = card.poster_path | poster_url %}
+            {% if src %}
+              <img class="poster" src="{{ src }}" alt="{{ card.title }} poster" loading="lazy">
+            {% else %}
+              <div class="poster placeholder">{{ card.title }}</div>
+            {% endif %}
+          </a>
+          <div class="info">
+            <a class="title" href="{{ url }}" target="_blank" rel="noopener">{{ card.title }}</a>
+            <div class="meta">{{ card.year or "" }} &middot; {{ "Show" if card.type == "show" else "Movie" }}</div>
+            <div class="meta">Watched {{ card.last_watched_at.strftime("%b %Y") }}</div>
+          </div>
+          <div class="ask">
+            <p>Did you rate it?</p>
+            <button class="rated" type="button">Rated &#x2713;</button>
+            <button class="not-yet" type="button">Not yet</button>
+          </div>
+          <p class="error" hidden></p>
+        </article>
+      {% endfor %}
+    </main>
+  {% else %}
+    <p class="empty">All caught up &mdash; nothing left to rate.</p>
+  {% endif %}
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
