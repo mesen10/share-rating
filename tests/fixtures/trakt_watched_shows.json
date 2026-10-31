@@ -1,0 +1,18 @@
+[
+  {
+    "plays": 10,
+    "last_watched_at": "2024-12-03T21:30:00.000Z",
+    "last_updated_at": "2024-12-03T21:30:00.000Z",
+    "reset_at": null,
+    "show": {"title": "Shogun", "year": 2024,
+             "ids": {"trakt": 2001, "slug": "shogun-2024", "tvdb": 1, "imdb": "tt2788316", "tmdb": 126308}}
+  },
+  {
+    "plays": 3,
+    "last_watched_at": "2023-07-01T18:00:00.000Z",
+    "last_updated_at": "2023-07-01T18:00:00.000Z",
+    "reset_at": null,
+    "show": {"title": "Local Show", "year": 2022,
+             "ids": {"trakt": 2002, "slug": "local-show-2022", "tvdb": 2, "imdb": "tt0000002", "tmdb": null}}
+  }
+]
