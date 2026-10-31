@@ -1,0 +1,10 @@
+.venv/
+.idea/
+.superpowers/
+.env
+*.db
+*.db-*
+tests/fixtures/private/
+__pycache__/
+*.egg-info/
+.pytest_cache/
