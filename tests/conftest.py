@@ -1,7 +1,11 @@
 import pytest
 
+from share_rating import db
+
 
 @pytest.fixture
 def conn(tmp_path):
-    # Wired to the real schema in Task 2.
-    raise NotImplementedError
+    connection = db.connect(tmp_path / "test.db")
+    db.init_db(connection)
+    yield connection
+    connection.close()
