@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "share-rating"
+version = "0.1.0"
+description = "Find Trakt-watched titles you have not rated on IMDb yet."
+requires-python = ">=3.11"
+dependencies = ["flask", "requests", "python-dotenv"]
+
+[project.optional-dependencies]
+dev = ["pytest", "responses"]
+
+[tool.setuptools.packages.find]
+include = ["share_rating*"]
+
+[tool.setuptools.package-data]
+share_rating = ["templates/*.html", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
